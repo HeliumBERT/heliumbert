@@ -1,0 +1,3 @@
+"""Main file."""
+
+import model
