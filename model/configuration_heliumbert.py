@@ -103,13 +103,13 @@ class HeliumbertConfig(PretrainedConfig):
     >>> configuration = model.config
     ```"""
 
-    model_type = "heliumbert"
+    model_type = "albert"
 
     def __init__(
         self,
         vocab_size=30000,
         embedding_size=128,
-        hidden_size=409e6,
+        hidden_size=4096,
         num_hidden_layers=12,
         num_hidden_groups=1,
         num_attention_heads=64,
@@ -119,7 +119,7 @@ class HeliumbertConfig(PretrainedConfig):
         hidden_dropout_prob=0,
         attention_probs_dropout_prob=0,
         max_position_embeddings=512,
-        # type_vocab_size=2, Remove token type embeddings for Heliumbert
+        type_vocab_size=2,
         initializer_range=0.02,
         layer_norm_eps=1e-12,
         classifier_dropout_prob=0.1,
@@ -143,7 +143,7 @@ class HeliumbertConfig(PretrainedConfig):
         self.hidden_dropout_prob = hidden_dropout_prob
         self.attention_probs_dropout_prob = attention_probs_dropout_prob
         self.max_position_embeddings = max_position_embeddings
-        self.type_vocab_size = 0 # Remove token type embeddings for Heliumbert
+        self.type_vocab_size = type_vocab_size
         self.initializer_range = initializer_range
         self.layer_norm_eps = layer_norm_eps
         self.classifier_dropout_prob = classifier_dropout_prob
