@@ -719,7 +719,7 @@ class AlbertModel(AlbertPreTrainedModel):
         pooled_output = self.pooler_activation(self.pooler(sequence_output[:, 0])) if self.pooler is not None else None
 
         if not return_dict:
-            return (sequence_output) + encoder_outputs[1:]
+            return (sequence_output, pooled_output) + encoder_outputs[1:]
 
         return BaseModelOutput(
             last_hidden_state=sequence_output,
