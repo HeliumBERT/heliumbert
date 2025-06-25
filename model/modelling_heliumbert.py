@@ -605,12 +605,13 @@ class AlbertModel(AlbertPreTrainedModel):
         self.config = config
         self.embeddings = AlbertEmbeddings(config)
         self.encoder = AlbertTransformer(config)
-        if add_pooling_layer:
-            self.pooler = nn.Linear(config.hidden_size, config.hidden_size)
-            self.pooler_activation = nn.Tanh()
-        else:
-            self.pooler = None
-            self.pooler_activation = None
+
+        # if add_pooling_layer:
+        #     self.pooler = nn.Linear(config.hidden_size, config.hidden_size)
+        #     self.pooler_activation = nn.Tanh()
+        # else:
+        self.pooler = None
+        self.pooler_activation = None
 
         self.attn_implementation = config._attn_implementation
         self.position_embedding_type = config.position_embedding_type
