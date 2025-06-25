@@ -29,7 +29,7 @@ from transformers.pytorch_utils import (
 )
 from transformers.utils.generic import ModelOutput
 from transformers.utils import logging
-from .configuration_heliumbert import HeliumbertConfig
+from .configuration_heliumbert import AlbertConfig
 
 
 logger = logging.get_logger(__name__)
@@ -166,7 +166,7 @@ class AlbertEmbeddings(nn.Module):
     Construct the embeddings from word, position and token_type embeddings.
     """
 
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
         self.word_embeddings = nn.Embedding(config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.embedding_size)
@@ -218,9 +218,9 @@ class AlbertEmbeddings(nn.Module):
 
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
-        # token_type_embeddings = self.token_type_embeddings(token_type_ids) Remove token-type embeddings
+        token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
-        embeddings = inputs_embeds # + token_type_embeddings Remove token-type embeddings
+        embeddings = inputs_embeds + token_type_embeddings
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
             embeddings += position_embeddings
@@ -230,7 +230,7 @@ class AlbertEmbeddings(nn.Module):
 
 
 class AlbertAttention(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
             raise ValueError(
@@ -402,7 +402,7 @@ ALBERT_ATTENTION_CLASSES = {
 
 
 class AlbertLayer(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
         self.config = config
@@ -443,7 +443,7 @@ class AlbertLayer(nn.Module):
 
 
 class AlbertLayerGroup(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
         self.albert_layers = nn.ModuleList([AlbertLayer(config) for _ in range(config.inner_group_num)])
@@ -478,7 +478,7 @@ class AlbertLayerGroup(nn.Module):
 
 
 class AlbertTransformer(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
         self.config = config
@@ -532,7 +532,7 @@ class AlbertTransformer(nn.Module):
 
 
 class AlbertPreTrainedModel(PreTrainedModel):
-    config_class = HeliumbertConfig
+    config_class = AlbertConfig
     load_tf_weights = load_tf_weights_in_albert
     base_model_prefix = "albert"
     _supports_sdpa = True
@@ -592,10 +592,10 @@ class AlbertForPreTrainingOutput(ModelOutput):
 
 
 class AlbertModel(AlbertPreTrainedModel):
-    config_class = HeliumbertConfig
+    config_class = AlbertConfig
     base_model_prefix = "albert"
 
-    def __init__(self, config: HeliumbertConfig, add_pooling_layer: bool = True):
+    def __init__(self, config: AlbertConfig, add_pooling_layer: bool = True):
         r"""
         add_pooling_layer (bool, *optional*, defaults to `True`):
             Whether to add a pooling layer
@@ -721,9 +721,9 @@ class AlbertModel(AlbertPreTrainedModel):
         if not return_dict:
             return (sequence_output, pooled_output) + encoder_outputs[1:]
 
-        return BaseModelOutput(
+        return BaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
-            # pooler_output=pooled_output, Remove pooler
+            pooler_output=pooled_output,
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
         )
@@ -733,7 +733,7 @@ class AlbertModel(AlbertPreTrainedModel):
 class AlbertForPreTraining(AlbertPreTrainedModel):
     _tied_weights_keys = ["predictions.decoder.bias", "predictions.decoder.weight"]
 
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
 
         self.albert = AlbertModel(config)
@@ -833,7 +833,7 @@ class AlbertForPreTraining(AlbertPreTrainedModel):
 
 
 class AlbertMLMHead(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
         self.LayerNorm = nn.LayerNorm(config.embedding_size, eps=config.layer_norm_eps)
@@ -863,7 +863,7 @@ class AlbertMLMHead(nn.Module):
 
 
 class AlbertSOPHead(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
         self.dropout = nn.Dropout(config.classifier_dropout_prob)
@@ -983,7 +983,7 @@ class AlbertForMaskedLM(AlbertPreTrainedModel):
 
 
 class AlbertForSequenceClassification(AlbertPreTrainedModel):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
@@ -1071,7 +1071,7 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
 
 
 class AlbertForTokenClassification(AlbertPreTrainedModel):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
 
@@ -1143,7 +1143,7 @@ class AlbertForTokenClassification(AlbertPreTrainedModel):
 
 
 class AlbertForQuestionAnswering(AlbertPreTrainedModel):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
 
@@ -1221,7 +1221,7 @@ class AlbertForQuestionAnswering(AlbertPreTrainedModel):
 
 
 class AlbertForMultipleChoice(AlbertPreTrainedModel):
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
 
         self.albert = AlbertModel(config)
