@@ -1,5 +1,5 @@
 from transformers import Trainer, TrainingArguments, AutoTokenizer
-from model import HeliumbertConfig, AlbertForSequenceClassification
+from model import HeliumbertConfig, HeliumbertForSequenceClassification
 from datasets import load_dataset
 
 # Load dataset
@@ -17,7 +17,7 @@ dataset.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
 
 # Model config
 config = HeliumbertConfig(num_labels=2, num_hidden_layers=6)
-model = AlbertForSequenceClassification(config)
+model = HeliumbertForSequenceClassification(config)
 
 # Training arguments
 training_args = TrainingArguments(
