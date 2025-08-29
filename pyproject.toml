@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heliumbert"
+version = "0.1.0"
+description = "HeliumBERT – A lightweight hybrid of DistilBERT and ALBERT"
+authors = [{ name="Azelynn", email="azelynnrituapersonality@gmail.com" }]
+dependencies = ["torch>=2.8.0", "transformers>=4.55.4"]
