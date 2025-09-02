@@ -193,7 +193,7 @@ class AlbertAttention(nn.Module):
         self.attention_dropout = nn.Dropout(config.attention_probs_dropout_prob)
         self.output_dropout = nn.Dropout(config.hidden_dropout_prob)
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.pruned_heads = set()
 
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
@@ -278,7 +278,7 @@ class AlbertAttention(nn.Module):
 
         projected_context_layer = self.dense(context_layer)
         projected_context_layer_dropout = self.output_dropout(projected_context_layer)
-        layernormed_context_layer = self.LayerNorm(hidden_states + projected_context_layer_dropout)
+        layernormed_context_layer = self.layer_norm(hidden_states + projected_context_layer_dropout)
         return (layernormed_context_layer, attention_probs) if output_attentions else (layernormed_context_layer,)
 
 
@@ -337,7 +337,7 @@ class AlbertSdpaAttention(AlbertAttention):
 
         projected_context_layer = self.dense(attention_output)
         projected_context_layer_dropout = self.output_dropout(projected_context_layer)
-        layernormed_context_layer = self.LayerNorm(hidden_states + projected_context_layer_dropout)
+        layernormed_context_layer = self.layer_norm(hidden_states + projected_context_layer_dropout)
         return (layernormed_context_layer,)
 
 
