@@ -60,7 +60,8 @@ class HeliumbertEmbeddings(nn.Module):
         # A vector is taken from it based on the sentence (ex. sentence 1 has a vector), then
         # it's added to the word embedding.
         # Has shape of (type_vocab_size, embedding_size).
-        self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.embedding_size)
+        # Removed since DistilBERT removes this.
+        # self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.embedding_size)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
@@ -86,9 +87,10 @@ class HeliumbertEmbeddings(nn.Module):
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
 
         # same for token type ids
-        self.register_buffer(
-            "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
-        )
+        # Removed since DistilBERT removes token-type embeddings.
+        # self.register_buffer(
+        #     "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
+        # )
 
     # Copied from transformers.models.bert.modeling_bert.BertEmbeddings.forward
     def forward(
@@ -98,7 +100,8 @@ class HeliumbertEmbeddings(nn.Module):
         input_ids: Optional[torch.LongTensor] = None,
 
         # Token-type ids for each input index. (batch_size, seq_length)
-        token_type_ids: Optional[torch.LongTensor] = None,
+        # Removed because DistilBERT removes token-type embeddings.
+        # token_type_ids: Optional[torch.LongTensor] = None,
 
         # Position ids for each input index. (batch_size, seq_length)
         position_ids: Optional[torch.LongTensor] = None,
@@ -127,13 +130,14 @@ class HeliumbertEmbeddings(nn.Module):
         # when its auto-generated, registered buffer helps users when tracing the model without passing token_type_ids, solves
         # issue #5664
         # If there are no token_type_ids, either get them from the buffer or generate your own if that doesn't exist.
-        if token_type_ids is None:
-            if hasattr(self, "token_type_ids"):
-                buffered_token_type_ids = self.token_type_ids[:, :seq_length]
-                buffered_token_type_ids_expanded = buffered_token_type_ids.expand(input_shape[0], seq_length)
-                token_type_ids = buffered_token_type_ids_expanded
-            else:
-                token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
+        # Removed because DistilBERT removes token-type embeddings.
+        # if token_type_ids is None:
+        #     if hasattr(self, "token_type_ids"):
+        #         buffered_token_type_ids = self.token_type_ids[:, :seq_length]
+        #         buffered_token_type_ids_expanded = buffered_token_type_ids.expand(input_shape[0], seq_length)
+        #         token_type_ids = buffered_token_type_ids_expanded
+        #     else:
+        #         token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
 
         # Get the input embeddings! If block only when bypassing.
         if inputs_embeds is None:
@@ -141,9 +145,9 @@ class HeliumbertEmbeddings(nn.Module):
 
         # Add everything!
 
-        token_type_embeddings = self.token_type_embeddings(token_type_ids)
+        # token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
-        embeddings = inputs_embeds + token_type_embeddings
+        embeddings = inputs_embeds # + token_type_embeddings
 
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
@@ -577,7 +581,7 @@ class HeliumbertModel(HeliumbertPreTrainedModel):
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
+        # token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -601,21 +605,21 @@ class HeliumbertModel(HeliumbertPreTrainedModel):
         else:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
-        batch_size, seq_length = input_shape
+        _, seq_length = input_shape
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
         if attention_mask is None:
             attention_mask = torch.ones(input_shape, device=device)
-        if token_type_ids is None:
-            if hasattr(self.embeddings, "token_type_ids"):
-                buffered_token_type_ids = self.embeddings.token_type_ids[:, :seq_length]
-                buffered_token_type_ids_expanded = buffered_token_type_ids.expand(batch_size, seq_length)
-                token_type_ids = buffered_token_type_ids_expanded
-            else:
-                token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+        # if token_type_ids is None:
+        #     if hasattr(self.embeddings, "token_type_ids"):
+        #         buffered_token_type_ids = self.embeddings.token_type_ids[:, :seq_length]
+        #         buffered_token_type_ids_expanded = buffered_token_type_ids.expand(batch_size, seq_length)
+        #         token_type_ids = buffered_token_type_ids_expanded
+        #     else:
+        #         token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
 
         embedding_output = self.embeddings(
-            input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
+            input_ids, position_ids=position_ids, inputs_embeds=inputs_embeds # , token_type_ids=token_type_ids
         )
 
         use_sdpa_attention_mask = (
@@ -694,7 +698,7 @@ class HeliumbertForPreTraining(HeliumbertPreTrainedModel):
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
+        # token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -719,7 +723,7 @@ class HeliumbertForPreTraining(HeliumbertPreTrainedModel):
         outputs = self.heliumbert(
             input_ids,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
+            # token_type_ids=token_type_ids,
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
@@ -827,7 +831,7 @@ class HeliumbertForMaskedLM(HeliumbertPreTrainedModel):
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
+        # token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -847,7 +851,7 @@ class HeliumbertForMaskedLM(HeliumbertPreTrainedModel):
         outputs = self.heliumbert(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
+            # token_type_ids=token_type_ids,
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
@@ -901,7 +905,7 @@ class HeliumbertForSequenceClassification(HeliumbertPreTrainedModel):
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
+        # token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -921,7 +925,7 @@ class HeliumbertForSequenceClassification(HeliumbertPreTrainedModel):
         outputs = self.heliumbert(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
+            # token_type_ids=token_type_ids,
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
@@ -994,7 +998,7 @@ class HeliumbertForTokenClassification(HeliumbertPreTrainedModel):
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
+        # token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -1012,7 +1016,7 @@ class HeliumbertForTokenClassification(HeliumbertPreTrainedModel):
         outputs = self.heliumbert(
             input_ids,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
+            # token_type_ids=token_type_ids,
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
@@ -1061,7 +1065,7 @@ class HeliumbertForQuestionAnswering(HeliumbertPreTrainedModel):
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
+        # token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -1076,7 +1080,7 @@ class HeliumbertForQuestionAnswering(HeliumbertPreTrainedModel):
         outputs = self.heliumbert(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
+            # token_type_ids=token_type_ids,
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
@@ -1140,7 +1144,7 @@ class HeliumbertForMultipleChoice(HeliumbertPreTrainedModel):
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
+        # token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -1157,14 +1161,6 @@ class HeliumbertForMultipleChoice(HeliumbertPreTrainedModel):
             [`PreTrainedTokenizer.encode`] for details.
 
             [What are input IDs?](../glossary#input-ids)
-        token_type_ids (`torch.LongTensor` of shape `(batch_size, num_choices, sequence_length)`, *optional*):
-            Segment token indices to indicate first and second portions of the inputs. Indices are selected in `[0,
-            1]`:
-
-            - 0 corresponds to a *sentence A* token,
-            - 1 corresponds to a *sentence B* token.
-
-            [What are token type IDs?](../glossary#token-type-ids)
         position_ids (`torch.LongTensor` of shape `(batch_size, num_choices, sequence_length)`, *optional*):
             Indices of positions of each input sequence tokens in the position embeddings. Selected in the range `[0,
             config.max_position_embeddings - 1]`.
@@ -1184,7 +1180,7 @@ class HeliumbertForMultipleChoice(HeliumbertPreTrainedModel):
 
         input_ids = input_ids.view(-1, input_ids.size(-1)) if input_ids is not None else None
         attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
-        token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
+        # token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
         position_ids = position_ids.view(-1, position_ids.size(-1)) if position_ids is not None else None
         inputs_embeds = (
             inputs_embeds.view(-1, inputs_embeds.size(-2), inputs_embeds.size(-1))
@@ -1194,7 +1190,7 @@ class HeliumbertForMultipleChoice(HeliumbertPreTrainedModel):
         outputs = self.heliumbert(
             input_ids,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
+            # token_type_ids=token_type_ids,
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
@@ -1226,6 +1222,8 @@ class HeliumbertForMultipleChoice(HeliumbertPreTrainedModel):
         )
 
 
+quank = 1
+
 __all__ = [
     "HeliumbertPreTrainedModel",
     "HeliumbertModel",
@@ -1235,4 +1233,5 @@ __all__ = [
     "HeliumbertForTokenClassification",
     "HeliumbertForQuestionAnswering",
     "HeliumbertForMultipleChoice",
+    "quank"
 ]

@@ -10,4 +10,4 @@ authors = [{ name="Azelynn", email="azelynnrituapersonality@gmail.com" }]
 dependencies = ["torch>=2.8.0", "transformers>=4.55.4"]
 
 [tool.setuptools.packages.find]
-include = ["src/heliumbert*"]
+include = ["heliumbert*"]
