@@ -530,7 +530,7 @@ class HeliumbertModel(HeliumbertPreTrainedModel):
     config: HeliumbertConfig
     base_model_prefix = "heliumbert"
 
-    def __init__(self, config: HeliumbertConfig, add_pooling_layer: bool = True):
+    def __init__(self, config: HeliumbertConfig): # , add_pooling_layer: bool = True
         r"""
         add_pooling_layer (bool, *optional*, defaults to `True`):
             Whether to add a pooling layer
@@ -540,12 +540,13 @@ class HeliumbertModel(HeliumbertPreTrainedModel):
         self.config = config
         self.embeddings = HeliumbertEmbeddings(config)
         self.encoder = HeliumbertTransformer(config)
-        if add_pooling_layer:
-            self.pooler = nn.Linear(config.hidden_size, config.hidden_size)
-            self.pooler_activation = nn.Tanh()
-        else:
-            self.pooler = None
-            self.pooler_activation = None
+
+        # if add_pooling_layer:
+        #     self.pooler = nn.Linear(config.hidden_size, config.hidden_size)
+        #     self.pooler_activation = nn.Tanh()
+        # else:
+        #     self.pooler = None
+        #     self.pooler_activation = None
 
         self.attn_implementation = config._attn_implementation
         self.position_embedding_type = config.position_embedding_type
@@ -651,14 +652,14 @@ class HeliumbertModel(HeliumbertPreTrainedModel):
 
         sequence_output = encoder_outputs[0]
 
-        pooled_output = self.pooler_activation(self.pooler(sequence_output[:, 0])) if self.pooler is not None else None
+        # pooled_output = self.pooler_activation(self.pooler(sequence_output[:, 0])) if self.pooler is not None else None
 
         if not return_dict:
-            return (sequence_output, pooled_output) + encoder_outputs[1:]
+            return (sequence_output, None) + encoder_outputs[1:]
 
         return BaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
-            pooler_output=pooled_output,
+            pooler_output=None,
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
         )
@@ -810,7 +811,7 @@ class HeliumbertForMaskedLM(HeliumbertPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
 
-        self.heliumbert = HeliumbertModel(config, add_pooling_layer=False)
+        self.heliumbert = HeliumbertModel(config)
         self.predictions = HeliumbertMLMHead(config)
 
         # Initialize weights and apply final processing
@@ -981,7 +982,7 @@ class HeliumbertForTokenClassification(HeliumbertPreTrainedModel):
         super().__init__(config)
         self.num_labels = config.num_labels
 
-        self.heliumbert = HeliumbertModel(config, add_pooling_layer=False)
+        self.heliumbert = HeliumbertModel(config)
         classifier_dropout_prob = (
             config.classifier_dropout_prob
             if config.classifier_dropout_prob is not None
@@ -1054,7 +1055,7 @@ class HeliumbertForQuestionAnswering(HeliumbertPreTrainedModel):
         super().__init__(config)
         self.num_labels = config.num_labels
 
-        self.heliumbert = HeliumbertModel(config, add_pooling_layer=False)
+        self.heliumbert = HeliumbertModel(config)
         self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
 
         # Initialize weights and apply final processing
@@ -1222,8 +1223,6 @@ class HeliumbertForMultipleChoice(HeliumbertPreTrainedModel):
         )
 
 
-quank = 1
-
 __all__ = [
     "HeliumbertPreTrainedModel",
     "HeliumbertModel",
@@ -1232,6 +1231,5 @@ __all__ = [
     "HeliumbertForSequenceClassification",
     "HeliumbertForTokenClassification",
     "HeliumbertForQuestionAnswering",
-    "HeliumbertForMultipleChoice",
-    "quank"
+    "HeliumbertForMultipleChoice"
 ]
