@@ -1,4 +1,18 @@
-"""PyTorch HeliumBERT model."""
+# coding=utf-8
+# Copyright 2018 Google AI, Google Brain and the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""PyTorch ALBERT model."""
 
 import math
 import os
@@ -9,9 +23,9 @@ import torch
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
-from transformers.activations import ACT2FN
-from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
-from transformers.modeling_outputs import (
+from ...activations import ACT2FN
+from ...modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
+from ...modeling_outputs import (
     BaseModelOutput,
     BaseModelOutputWithPooling,
     MaskedLMOutput,
@@ -20,16 +34,14 @@ from transformers.modeling_outputs import (
     SequenceClassifierOutput,
     TokenClassifierOutput,
 )
-from transformers.modeling_utils import PreTrainedModel
-from transformers.pytorch_utils import (
+from ...modeling_utils import PreTrainedModel
+from ...pytorch_utils import (
     apply_chunking_to_forward,
     find_pruneable_heads_and_indices,
-    is_torch_greater_or_equal_than_2_2,
     prune_linear_layer,
 )
-from transformers.utils.generic import ModelOutput
-from transformers.utils import logging
-from .configuration_heliumbert import HeliumbertConfig
+from ...utils import ModelOutput, auto_docstring, logging
+from .configuration_albert import AlbertConfig
 
 
 logger = logging.get_logger(__name__)
@@ -161,16 +173,16 @@ def load_tf_weights_in_albert(model, config, tf_checkpoint_path):
     return model
 
 
-class HeliumbertEmbeddings(nn.Module):
+class AlbertEmbeddings(nn.Module):
     """
     Construct the embeddings from word, position and token_type embeddings.
     """
 
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
         self.word_embeddings = nn.Embedding(config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.embedding_size)
-        # self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.embedding_size)
+        self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.embedding_size)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
@@ -208,19 +220,19 @@ class HeliumbertEmbeddings(nn.Module):
         # Setting the token_type_ids to the registered buffer in constructor where it is all zeros, which usually occurs
         # when its auto-generated, registered buffer helps users when tracing the model without passing token_type_ids, solves
         # issue #5664
-        # if token_type_ids is None:
-        #     if hasattr(self, "token_type_ids"):
-        #         buffered_token_type_ids = self.token_type_ids[:, :seq_length]
-        #         buffered_token_type_ids_expanded = buffered_token_type_ids.expand(input_shape[0], seq_length)
-        #         token_type_ids = buffered_token_type_ids_expanded
-        #     else:
-        #         token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
+        if token_type_ids is None:
+            if hasattr(self, "token_type_ids"):
+                buffered_token_type_ids = self.token_type_ids[:, :seq_length]
+                buffered_token_type_ids_expanded = buffered_token_type_ids.expand(input_shape[0], seq_length)
+                token_type_ids = buffered_token_type_ids_expanded
+            else:
+                token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
 
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
-        # token_type_embeddings = self.token_type_embeddings(token_type_ids)
+        token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
-        embeddings = inputs_embeds # + token_type_embeddings
+        embeddings = inputs_embeds + token_type_embeddings
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
             embeddings += position_embeddings
@@ -229,8 +241,8 @@ class HeliumbertEmbeddings(nn.Module):
         return embeddings
 
 
-class HeliumbertAttention(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+class AlbertAttention(nn.Module):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
             raise ValueError(
@@ -258,12 +270,6 @@ class HeliumbertAttention(nn.Module):
             self.max_position_embeddings = config.max_position_embeddings
             self.distance_embedding = nn.Embedding(2 * config.max_position_embeddings - 1, self.attention_head_size)
 
-    # Copied from transformers.models.bert.modeling_bert.BertSelfAttention.transpose_for_scores
-    def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
-        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
-        x = x.view(new_x_shape)
-        return x.permute(0, 2, 1, 3)
-
     def prune_heads(self, heads: list[int]) -> None:
         if len(heads) == 0:
             return
@@ -289,13 +295,17 @@ class HeliumbertAttention(nn.Module):
         head_mask: Optional[torch.FloatTensor] = None,
         output_attentions: bool = False,
     ) -> Union[tuple[torch.Tensor], tuple[torch.Tensor, torch.Tensor]]:
-        mixed_query_layer = self.query(hidden_states)
-        mixed_key_layer = self.key(hidden_states)
-        mixed_value_layer = self.value(hidden_states)
-
-        query_layer = self.transpose_for_scores(mixed_query_layer)
-        key_layer = self.transpose_for_scores(mixed_key_layer)
-        value_layer = self.transpose_for_scores(mixed_value_layer)
+        batch_size, seq_length, _ = hidden_states.shape
+        query_layer = self.query(hidden_states)
+        key_layer = self.key(hidden_states)
+        value_layer = self.value(hidden_states)
+        query_layer = query_layer.view(batch_size, -1, self.num_attention_heads, self.attention_head_size).transpose(
+            1, 2
+        )
+        key_layer = key_layer.view(batch_size, -1, self.num_attention_heads, self.attention_head_size).transpose(1, 2)
+        value_layer = value_layer.view(batch_size, -1, self.num_attention_heads, self.attention_head_size).transpose(
+            1, 2
+        )
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
@@ -341,11 +351,10 @@ class HeliumbertAttention(nn.Module):
         return (layernormed_context_layer, attention_probs) if output_attentions else (layernormed_context_layer,)
 
 
-class HeliumbertSdpaAttention(HeliumbertAttention):
+class AlbertSdpaAttention(AlbertAttention):
     def __init__(self, config):
         super().__init__(config)
         self.dropout_prob = config.attention_probs_dropout_prob
-        self.require_contiguous_qkv = not is_torch_greater_or_equal_than_2_2
 
     def forward(
         self,
@@ -365,17 +374,21 @@ class HeliumbertSdpaAttention(HeliumbertAttention):
             return super().forward(hidden_states, attention_mask, output_attentions=output_attentions)
 
         batch_size, seq_len, _ = hidden_states.size()
-        query_layer = self.transpose_for_scores(self.query(hidden_states))
-        key_layer = self.transpose_for_scores(self.key(hidden_states))
-        value_layer = self.transpose_for_scores(self.value(hidden_states))
-
-        # SDPA with memory-efficient backend is broken in torch==2.1.2 when using non-contiguous inputs and a custom
-        # attn_mask, so we need to call `.contiguous()` here. This was fixed in torch==2.2.0.
-        # Reference: https://github.com/pytorch/pytorch/issues/112577
-        if self.require_contiguous_qkv and query_layer.device.type == "cuda" and attention_mask is not None:
-            query_layer = query_layer.contiguous()
-            key_layer = key_layer.contiguous()
-            value_layer = value_layer.contiguous()
+        query_layer = (
+            self.query(hidden_states)
+            .view(batch_size, -1, self.num_attention_heads, self.attention_head_size)
+            .transpose(1, 2)
+        )
+        key_layer = (
+            self.key(hidden_states)
+            .view(batch_size, -1, self.num_attention_heads, self.attention_head_size)
+            .transpose(1, 2)
+        )
+        value_layer = (
+            self.value(hidden_states)
+            .view(batch_size, -1, self.num_attention_heads, self.attention_head_size)
+            .transpose(1, 2)
+        )
 
         attention_output = torch.nn.functional.scaled_dot_product_attention(
             query=query_layer,
@@ -396,13 +409,13 @@ class HeliumbertSdpaAttention(HeliumbertAttention):
 
 
 ALBERT_ATTENTION_CLASSES = {
-    "eager": HeliumbertAttention,
-    "sdpa": HeliumbertSdpaAttention,
+    "eager": AlbertAttention,
+    "sdpa": AlbertSdpaAttention,
 }
 
 
-class HeliumbertLayer(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+class AlbertLayer(nn.Module):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
         self.config = config
@@ -442,11 +455,11 @@ class HeliumbertLayer(nn.Module):
         return ffn_output
 
 
-class HeliumbertLayerGroup(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+class AlbertLayerGroup(nn.Module):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
-        self.albert_layers = nn.ModuleList([HeliumbertLayer(config) for _ in range(config.inner_group_num)])
+        self.albert_layers = nn.ModuleList([AlbertLayer(config) for _ in range(config.inner_group_num)])
 
     def forward(
         self,
@@ -477,13 +490,13 @@ class HeliumbertLayerGroup(nn.Module):
         return outputs  # last-layer hidden state, (layer hidden states), (layer attentions)
 
 
-class HeliumbertTransformer(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+class AlbertTransformer(nn.Module):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
         self.config = config
         self.embedding_hidden_mapping_in = nn.Linear(config.embedding_size, config.hidden_size)
-        self.albert_layer_groups = nn.ModuleList([HeliumbertLayerGroup(config) for _ in range(config.num_hidden_groups)])
+        self.albert_layer_groups = nn.ModuleList([AlbertLayerGroup(config) for _ in range(config.num_hidden_groups)])
 
     def forward(
         self,
@@ -530,9 +543,9 @@ class HeliumbertTransformer(nn.Module):
         )
 
 
-
-class HeliumbertPreTrainedModel(PreTrainedModel):
-    config_class = HeliumbertConfig
+@auto_docstring
+class AlbertPreTrainedModel(PreTrainedModel):
+    config: AlbertConfig
     load_tf_weights = load_tf_weights_in_albert
     base_model_prefix = "albert"
     _supports_sdpa = True
@@ -552,35 +565,26 @@ class HeliumbertPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-        elif isinstance(module, HeliumbertMLMHead):
+        elif isinstance(module, AlbertMLMHead):
             module.bias.data.zero_()
 
 
 @dataclass
-class HeliumbertForPreTrainingOutput(ModelOutput):
-    """
+@auto_docstring(
+    custom_intro="""
     Output type of [`AlbertForPreTraining`].
-
-    Args:
-        loss (*optional*, returned when `labels` is provided, `torch.FloatTensor` of shape `(1,)`):
-            Total loss as the sum of the masked language modeling loss and the next sequence prediction
-            (classification) loss.
-        prediction_logits (`torch.FloatTensor` of shape `(batch_size, sequence_length, config.vocab_size)`):
-            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        sop_logits (`torch.FloatTensor` of shape `(batch_size, 2)`):
-            Prediction scores of the next sequence prediction (classification) head (scores of True/False continuation
-            before SoftMax).
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer) of
-            shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
+    """
+)
+class AlbertForPreTrainingOutput(ModelOutput):
+    r"""
+    loss (*optional*, returned when `labels` is provided, `torch.FloatTensor` of shape `(1,)`):
+        Total loss as the sum of the masked language modeling loss and the next sequence prediction
+        (classification) loss.
+    prediction_logits (`torch.FloatTensor` of shape `(batch_size, sequence_length, config.vocab_size)`):
+        Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
+    sop_logits (`torch.FloatTensor` of shape `(batch_size, 2)`):
+        Prediction scores of the next sequence prediction (classification) head (scores of True/False continuation
+        before SoftMax).
     """
 
     loss: Optional[torch.FloatTensor] = None
@@ -590,12 +594,12 @@ class HeliumbertForPreTrainingOutput(ModelOutput):
     attentions: Optional[tuple[torch.FloatTensor]] = None
 
 
-
-class HeliumbertModel(HeliumbertPreTrainedModel):
-    config_class = HeliumbertConfig
+@auto_docstring
+class AlbertModel(AlbertPreTrainedModel):
+    config: AlbertConfig
     base_model_prefix = "albert"
 
-    def __init__(self, config: HeliumbertConfig, add_pooling_layer: bool = True):
+    def __init__(self, config: AlbertConfig, add_pooling_layer: bool = True):
         r"""
         add_pooling_layer (bool, *optional*, defaults to `True`):
             Whether to add a pooling layer
@@ -603,15 +607,14 @@ class HeliumbertModel(HeliumbertPreTrainedModel):
         super().__init__(config)
 
         self.config = config
-        self.embeddings = HeliumbertEmbeddings(config)
-        self.encoder = HeliumbertTransformer(config)
-
-        # if add_pooling_layer:
-        #     self.pooler = nn.Linear(config.hidden_size, config.hidden_size)
-        #     self.pooler_activation = nn.Tanh()
-        # else:
-        self.pooler = None
-        self.pooler_activation = None
+        self.embeddings = AlbertEmbeddings(config)
+        self.encoder = AlbertTransformer(config)
+        if add_pooling_layer:
+            self.pooler = nn.Linear(config.hidden_size, config.hidden_size)
+            self.pooler_activation = nn.Tanh()
+        else:
+            self.pooler = None
+            self.pooler_activation = None
 
         self.attn_implementation = config._attn_implementation
         self.position_embedding_type = config.position_embedding_type
@@ -642,7 +645,7 @@ class HeliumbertModel(HeliumbertPreTrainedModel):
             inner_group_idx = int(layer - group_idx * self.config.inner_group_num)
             self.encoder.albert_layer_groups[group_idx].albert_layers[inner_group_idx].attention.prune_heads(heads)
 
-    
+    @auto_docstring
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -730,16 +733,21 @@ class HeliumbertModel(HeliumbertPreTrainedModel):
         )
 
 
-
-class HeliumbertForPreTraining(HeliumbertPreTrainedModel):
+@auto_docstring(
+    custom_intro="""
+    Albert Model with two heads on top as done during the pretraining: a `masked language modeling` head and a
+    `sentence order prediction (classification)` head.
+    """
+)
+class AlbertForPreTraining(AlbertPreTrainedModel):
     _tied_weights_keys = ["predictions.decoder.bias", "predictions.decoder.weight"]
 
-    def __init__(self, config: HeliumbertConfig):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
 
-        self.albert = HeliumbertModel(config)
-        self.predictions = HeliumbertMLMHead(config)
-        self.sop_classifier = HeliumbertSOPHead(config)
+        self.albert = AlbertModel(config)
+        self.predictions = AlbertMLMHead(config)
+        self.sop_classifier = AlbertSOPHead(config)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -753,7 +761,7 @@ class HeliumbertForPreTraining(HeliumbertPreTrainedModel):
     def get_input_embeddings(self) -> nn.Embedding:
         return self.albert.embeddings.word_embeddings
 
-    
+    @auto_docstring
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -767,7 +775,7 @@ class HeliumbertForPreTraining(HeliumbertPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[HeliumbertForPreTrainingOutput, tuple]:
+    ) -> Union[AlbertForPreTrainingOutput, tuple]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for computing the masked language modeling loss. Indices should be in `[-100, 0, ...,
@@ -824,7 +832,7 @@ class HeliumbertForPreTraining(HeliumbertPreTrainedModel):
             output = (prediction_scores, sop_scores) + outputs[2:]
             return ((total_loss,) + output) if total_loss is not None else output
 
-        return HeliumbertForPreTrainingOutput(
+        return AlbertForPreTrainingOutput(
             loss=total_loss,
             prediction_logits=prediction_scores,
             sop_logits=sop_scores,
@@ -833,8 +841,8 @@ class HeliumbertForPreTraining(HeliumbertPreTrainedModel):
         )
 
 
-class HeliumbertMLMHead(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+class AlbertMLMHead(nn.Module):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
         self.LayerNorm = nn.LayerNorm(config.embedding_size, eps=config.layer_norm_eps)
@@ -863,8 +871,8 @@ class HeliumbertMLMHead(nn.Module):
             self.bias = self.decoder.bias
 
 
-class HeliumbertSOPHead(nn.Module):
-    def __init__(self, config: HeliumbertConfig):
+class AlbertSOPHead(nn.Module):
+    def __init__(self, config: AlbertConfig):
         super().__init__()
 
         self.dropout = nn.Dropout(config.classifier_dropout_prob)
@@ -876,15 +884,15 @@ class HeliumbertSOPHead(nn.Module):
         return logits
 
 
-
-class HeliumbertForMaskedLM(HeliumbertPreTrainedModel):
+@auto_docstring
+class AlbertForMaskedLM(AlbertPreTrainedModel):
     _tied_weights_keys = ["predictions.decoder.bias", "predictions.decoder.weight"]
 
     def __init__(self, config):
         super().__init__(config)
 
-        self.albert = HeliumbertModel(config, add_pooling_layer=False)
-        self.predictions = HeliumbertMLMHead(config)
+        self.albert = AlbertModel(config, add_pooling_layer=False)
+        self.predictions = AlbertMLMHead(config)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -899,7 +907,7 @@ class HeliumbertForMaskedLM(HeliumbertPreTrainedModel):
     def get_input_embeddings(self) -> nn.Embedding:
         return self.albert.embeddings.word_embeddings
 
-    
+    @auto_docstring
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -982,21 +990,26 @@ class HeliumbertForMaskedLM(HeliumbertPreTrainedModel):
         )
 
 
-
-class HeliumbertForSequenceClassification(HeliumbertPreTrainedModel):
-    def __init__(self, config: HeliumbertConfig):
+@auto_docstring(
+    custom_intro="""
+    Albert Model transformer with a sequence classification/regression head on top (a linear layer on top of the pooled
+    output) e.g. for GLUE tasks.
+    """
+)
+class AlbertForSequenceClassification(AlbertPreTrainedModel):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
 
-        self.albert = HeliumbertModel(config)
+        self.albert = AlbertModel(config)
         self.dropout = nn.Dropout(config.classifier_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
 
         # Initialize weights and apply final processing
         self.post_init()
 
-    
+    @auto_docstring
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -1070,13 +1083,13 @@ class HeliumbertForSequenceClassification(HeliumbertPreTrainedModel):
         )
 
 
-
-class HeliumbertForTokenClassification(HeliumbertPreTrainedModel):
-    def __init__(self, config: HeliumbertConfig):
+@auto_docstring
+class AlbertForTokenClassification(AlbertPreTrainedModel):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
 
-        self.albert = HeliumbertModel(config, add_pooling_layer=False)
+        self.albert = AlbertModel(config, add_pooling_layer=False)
         classifier_dropout_prob = (
             config.classifier_dropout_prob
             if config.classifier_dropout_prob is not None
@@ -1088,7 +1101,7 @@ class HeliumbertForTokenClassification(HeliumbertPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    
+    @auto_docstring
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -1142,19 +1155,19 @@ class HeliumbertForTokenClassification(HeliumbertPreTrainedModel):
         )
 
 
-
-class HeliumbertForQuestionAnswering(HeliumbertPreTrainedModel):
-    def __init__(self, config: HeliumbertConfig):
+@auto_docstring
+class AlbertForQuestionAnswering(AlbertPreTrainedModel):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
 
-        self.albert = HeliumbertModel(config, add_pooling_layer=False)
+        self.albert = AlbertModel(config, add_pooling_layer=False)
         self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
 
         # Initialize weights and apply final processing
         self.post_init()
 
-    
+    @auto_docstring
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -1168,7 +1181,7 @@ class HeliumbertForQuestionAnswering(HeliumbertPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[HeliumbertForPreTrainingOutput, tuple]:
+    ) -> Union[AlbertForPreTrainingOutput, tuple]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         outputs = self.albert(
@@ -1220,19 +1233,19 @@ class HeliumbertForQuestionAnswering(HeliumbertPreTrainedModel):
         )
 
 
-
-class HeliumbertForMultipleChoice(HeliumbertPreTrainedModel):
-    def __init__(self, config: HeliumbertConfig):
+@auto_docstring
+class AlbertForMultipleChoice(AlbertPreTrainedModel):
+    def __init__(self, config: AlbertConfig):
         super().__init__(config)
 
-        self.albert = HeliumbertModel(config)
+        self.albert = AlbertModel(config)
         self.dropout = nn.Dropout(config.classifier_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, 1)
 
         # Initialize weights and apply final processing
         self.post_init()
 
-    
+    @auto_docstring
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -1245,7 +1258,7 @@ class HeliumbertForMultipleChoice(HeliumbertPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[HeliumbertForPreTrainingOutput, tuple]:
+    ) -> Union[AlbertForPreTrainingOutput, tuple]:
         r"""
         input_ids (`torch.LongTensor` of shape `(batch_size, num_choices, sequence_length)`):
             Indices of input sequence tokens in the vocabulary.
@@ -1325,12 +1338,12 @@ class HeliumbertForMultipleChoice(HeliumbertPreTrainedModel):
 
 __all__ = [
     "load_tf_weights_in_albert",
-    "HeliumbertPreTrainedModel",
-    "HeliumbertModel",
-    "HeliumbertForPreTraining",
-    "HeliumbertForMaskedLM",
-    "HeliumbertForSequenceClassification",
-    "HeliumbertForTokenClassification",
-    "HeliumbertForQuestionAnswering",
-    "HeliumbertForMultipleChoice",
+    "AlbertPreTrainedModel",
+    "AlbertModel",
+    "AlbertForPreTraining",
+    "AlbertForMaskedLM",
+    "AlbertForSequenceClassification",
+    "AlbertForTokenClassification",
+    "AlbertForQuestionAnswering",
+    "AlbertForMultipleChoice",
 ]

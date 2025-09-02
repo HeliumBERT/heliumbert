@@ -13,16 +13,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""HeliumBERT model configuration"""
+"""ALBERT model configuration"""
 
 from collections import OrderedDict
 from collections.abc import Mapping
 
-from transformers.configuration_utils import PretrainedConfig
-from transformers.onnx import OnnxConfig
+from ...configuration_utils import PretrainedConfig
+from ...onnx import OnnxConfig
 
 
-class HeliumbertConfig(PretrainedConfig):
+class AlbertConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`AlbertModel`] or a [`TFAlbertModel`]. It is used
     to instantiate an ALBERT model according to the specified arguments, defining the model architecture. Instantiating
@@ -119,7 +119,7 @@ class HeliumbertConfig(PretrainedConfig):
         hidden_dropout_prob=0,
         attention_probs_dropout_prob=0,
         max_position_embeddings=512,
-        # type_vocab_size=2,
+        type_vocab_size=2,
         initializer_range=0.02,
         layer_norm_eps=1e-12,
         classifier_dropout_prob=0.1,
@@ -143,7 +143,7 @@ class HeliumbertConfig(PretrainedConfig):
         self.hidden_dropout_prob = hidden_dropout_prob
         self.attention_probs_dropout_prob = attention_probs_dropout_prob
         self.max_position_embeddings = max_position_embeddings
-        # self.type_vocab_size = type_vocab_size
+        self.type_vocab_size = type_vocab_size
         self.initializer_range = initializer_range
         self.layer_norm_eps = layer_norm_eps
         self.classifier_dropout_prob = classifier_dropout_prob
@@ -165,3 +165,6 @@ class AlbertOnnxConfig(OnnxConfig):
                 ("token_type_ids", dynamic_axis),
             ]
         )
+
+
+__all__ = ["AlbertConfig", "AlbertOnnxConfig"]
