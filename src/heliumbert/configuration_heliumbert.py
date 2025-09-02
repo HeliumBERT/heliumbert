@@ -109,7 +109,7 @@ class HeliumbertConfig(PretrainedConfig):
         self.position_embedding_type = position_embedding_type
 
 
-# Copied from transformers.models.bert.configuration_bert.BertOnnxConfig with Roberta->Albert
+# Copied from transformers.models.albert.configuration_albert.AlbertertOnnxConfig
 
 # This is an ONNX config file. It's for model exporting which includes some metadata lol.
 # TODO add back
