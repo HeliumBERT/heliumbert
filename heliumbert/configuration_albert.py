@@ -18,8 +18,8 @@
 from collections import OrderedDict
 from collections.abc import Mapping
 
-from ...configuration_utils import PretrainedConfig
-from ...onnx import OnnxConfig
+from transformers.configuration_utils import PretrainedConfig
+from transformers.onnx import OnnxConfig
 
 
 class AlbertConfig(PretrainedConfig):
@@ -151,20 +151,25 @@ class AlbertConfig(PretrainedConfig):
 
 
 # Copied from transformers.models.bert.configuration_bert.BertOnnxConfig with Roberta->Albert
-class AlbertOnnxConfig(OnnxConfig):
-    @property
-    def inputs(self) -> Mapping[str, Mapping[int, str]]:
-        if self.task == "multiple-choice":
-            dynamic_axis = {0: "batch", 1: "choice", 2: "sequence"}
-        else:
-            dynamic_axis = {0: "batch", 1: "sequence"}
-        return OrderedDict(
-            [
-                ("input_ids", dynamic_axis),
-                ("attention_mask", dynamic_axis),
-                ("token_type_ids", dynamic_axis),
-            ]
-        )
+
+# This is an ONNX config file. It's for model exporting which includes some metadata lol.
+# TODO add back
+
+# class AlbertOnnxConfig(OnnxConfig):
+#     """Copied from transformers.models.bert.configuration_bert.BertOnnxConfig with Roberta->Albert"""
+#     @property
+#     def inputs(self) -> Mapping[str, Mapping[int, str]]:
+#         if self.task == "multiple-choice":
+#             dynamic_axis = {0: "batch", 1: "choice", 2: "sequence"}
+#         else:
+#             dynamic_axis = {0: "batch", 1: "sequence"}
+#         return OrderedDict(
+#             [
+#                 ("input_ids", dynamic_axis),
+#                 ("attention_mask", dynamic_axis),
+#                 ("token_type_ids", dynamic_axis),
+#             ]
+#         )
 
 
-__all__ = ["AlbertConfig", "AlbertOnnxConfig"]
+# __all__ = ["AlbertConfig", "AlbertOnnxConfig"]
