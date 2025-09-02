@@ -15,13 +15,13 @@
 """PyTorch ALBERT model."""
 
 import math
-import os
 from dataclasses import dataclass
 from typing import Optional, Union
 
 import torch
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+import torch.nn.functional as F
 
 from transformers.activations import ACT2FN
 from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
@@ -43,8 +43,12 @@ from transformers.pytorch_utils import (
 from transformers.utils import ModelOutput, auto_docstring, logging
 from .configuration_albert import AlbertConfig
 
+# pylint: disable=abstract-method
+
 
 logger = logging.get_logger(__name__)
+
+# Removed load_tf_weights_to_albert cause I ain't using tensorflow lol
 
 class AlbertEmbeddings(nn.Module):
     """
@@ -53,20 +57,49 @@ class AlbertEmbeddings(nn.Module):
 
     def __init__(self, config: AlbertConfig):
         super().__init__()
+
+        # Word embeddings are used to transform tokens into words.
+        # Has shape of (vocab_size, embedding_size). Ex. (30000, 128)
+        # padding_idx means that if self.word_embeddings(pad_token_id) is called,
+        # it will return all zeroes. Just.. used for padding for sentences that don't reach the max token limit.
         self.word_embeddings = nn.Embedding(config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id)
+
+        # Position embeddings encode the position of the token in relation to the sentence.
+        # A vector is taken from it (ex, position 1 has a vector, position 2 has a different vector, etc), then
+        # it's added to the word embedding.
+        # Has shape of (max_position_embeddings, embedding_size). Ex. (512, 128)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.embedding_size)
+
+        # Token-type embeddings encode which sentence the token is in.
+        # A vector is taken from it based on the sentence (ex. sentence 1 has a vector), then
+        # it's added to the word embedding.
+        # Has shape of (type_vocab_size, embedding_size).
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.embedding_size)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
-        self.LayerNorm = nn.LayerNorm(config.embedding_size, eps=config.layer_norm_eps)
+        # but now i snake-cased it because i ain't using tensorflow
+        # Layer norm is used to normalize the vectors because summing them is absolutely insane.
+        # eps stands for "Epsilon", a value that prevents normalization division from being a division by zero. Probably shouldn't touch that...
+        self.layer_norm = nn.LayerNorm(config.embedding_size, eps=config.layer_norm_eps)
+
+        # Dropout is a regularization technique.
+        # Some numbers in the embedding is set to 0 with a probability of hidden_dropout_prob, then everything else is scaled up by 1/(1-hidden_dropout_prob).
+        # This makes it so the model doesn't over-rely on only a few parameters. It has a big brain after all and not using all of it is waaa.
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
+
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
+        # This just simply puts position indices with range(0, max_position_mebeddings) to the buffer. but with torch! because fancy-
         self.register_buffer(
             "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
         )
+
+        # just does self.position_embeddng_type = config.position_embedding_type but optional, defaults to "absolute".
+        # backwards compatibility my ass
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
+
+        # same for token type ids
         self.register_buffer(
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
         )
@@ -74,12 +107,25 @@ class AlbertEmbeddings(nn.Module):
     # Copied from transformers.models.bert.modeling_bert.BertEmbeddings.forward
     def forward(
         self,
+
+        # Tokenized input indices. (batch_size, seq_length)
         input_ids: Optional[torch.LongTensor] = None,
+
+        # Token-type ids for each input index. (batch_size, seq_length)
         token_type_ids: Optional[torch.LongTensor] = None,
+
+        # Position ids for each input index. (batch_size, seq_length)
         position_ids: Optional[torch.LongTensor] = None,
+
+        # Direct input embeddings if you're doing something freaky.
         inputs_embeds: Optional[torch.FloatTensor] = None,
+
+        # Used to shift position indices when generating text.
         past_key_values_length: int = 0,
     ) -> torch.Tensor:
+        """Forward pass."""
+
+        # set input_shape depending on if you're using input_ids or input_embeds.
         if input_ids is not None:
             input_shape = input_ids.size()
         else:
@@ -87,12 +133,14 @@ class AlbertEmbeddings(nn.Module):
 
         seq_length = input_shape[1]
 
+        # If there are no position ids, fairly trivial to generate your own. [0, 1, ...] + past_key_values_length
         if position_ids is None:
             position_ids = self.position_ids[:, past_key_values_length : seq_length + past_key_values_length]
 
         # Setting the token_type_ids to the registered buffer in constructor where it is all zeros, which usually occurs
         # when its auto-generated, registered buffer helps users when tracing the model without passing token_type_ids, solves
         # issue #5664
+        # If there are no token_type_ids, either get them from the buffer or generate your own if that doesn't exist.
         if token_type_ids is None:
             if hasattr(self, "token_type_ids"):
                 buffered_token_type_ids = self.token_type_ids[:, :seq_length]
@@ -101,20 +149,30 @@ class AlbertEmbeddings(nn.Module):
             else:
                 token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
 
+        # Get the input embeddings! If block only when bypassing.
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
+
+        # Add everything!
+
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
         embeddings = inputs_embeds + token_type_embeddings
+
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
             embeddings += position_embeddings
-        embeddings = self.LayerNorm(embeddings)
+
+        # Normalize then dropout!
+        embeddings = self.layer_norm(embeddings)
         embeddings = self.dropout(embeddings)
+
         return embeddings
 
 
 class AlbertAttention(nn.Module):
+    """Represents an entire attention head for ALBERT."""
+
     def __init__(self, config: AlbertConfig):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
@@ -225,6 +283,8 @@ class AlbertAttention(nn.Module):
 
 
 class AlbertSdpaAttention(AlbertAttention):
+    """Represents the SDPA process of ALBERT."""
+
     def __init__(self, config):
         super().__init__(config)
         self.dropout_prob = config.attention_probs_dropout_prob
@@ -263,7 +323,7 @@ class AlbertSdpaAttention(AlbertAttention):
             .transpose(1, 2)
         )
 
-        attention_output = torch.nn.functional.scaled_dot_product_attention(
+        attention_output = F.scaled_dot_product_attention( # pylint: disable=not-callable
             query=query_layer,
             key=key_layer,
             value=value_layer,
@@ -288,6 +348,8 @@ ALBERT_ATTENTION_CLASSES = {
 
 
 class AlbertLayer(nn.Module):
+    """Represents a layer of ALBERT."""
+
     def __init__(self, config: AlbertConfig):
         super().__init__()
 
@@ -329,6 +391,7 @@ class AlbertLayer(nn.Module):
 
 
 class AlbertLayerGroup(nn.Module):
+    """Represents a layer group of ALBERT."""
     def __init__(self, config: AlbertConfig):
         super().__init__()
 
@@ -364,6 +427,8 @@ class AlbertLayerGroup(nn.Module):
 
 
 class AlbertTransformer(nn.Module):
+    """The ALBERT transformer."""
+
     def __init__(self, config: AlbertConfig):
         super().__init__()
 
@@ -418,8 +483,9 @@ class AlbertTransformer(nn.Module):
 
 @auto_docstring
 class AlbertPreTrainedModel(PreTrainedModel):
+    """Loading a pre-trained ALBERT."""
+
     config: AlbertConfig
-    load_tf_weights = load_tf_weights_in_albert
     base_model_prefix = "albert"
     _supports_sdpa = True
 
@@ -469,6 +535,8 @@ class AlbertForPreTrainingOutput(ModelOutput):
 
 @auto_docstring
 class AlbertModel(AlbertPreTrainedModel):
+    """The ALBERT model."""
+
     config: AlbertConfig
     base_model_prefix = "albert"
 
@@ -613,6 +681,7 @@ class AlbertModel(AlbertPreTrainedModel):
     """
 )
 class AlbertForPreTraining(AlbertPreTrainedModel):
+    """Albert for pre-training."""
     _tied_weights_keys = ["predictions.decoder.bias", "predictions.decoder.weight"]
 
     def __init__(self, config: AlbertConfig):
@@ -715,6 +784,7 @@ class AlbertForPreTraining(AlbertPreTrainedModel):
 
 
 class AlbertMLMHead(nn.Module):
+    """Albert's Masked Language Modelling head."""
     def __init__(self, config: AlbertConfig):
         super().__init__()
 
@@ -745,6 +815,7 @@ class AlbertMLMHead(nn.Module):
 
 
 class AlbertSOPHead(nn.Module):
+    """Albert's Sentence Order Prediction head."""
     def __init__(self, config: AlbertConfig):
         super().__init__()
 
@@ -759,6 +830,7 @@ class AlbertSOPHead(nn.Module):
 
 @auto_docstring
 class AlbertForMaskedLM(AlbertPreTrainedModel):
+    """Albert for Masked Language Modelling."""
     _tied_weights_keys = ["predictions.decoder.bias", "predictions.decoder.weight"]
 
     def __init__(self, config):
@@ -870,6 +942,7 @@ class AlbertForMaskedLM(AlbertPreTrainedModel):
     """
 )
 class AlbertForSequenceClassification(AlbertPreTrainedModel):
+    """Albert for Sequence Classification."""
     def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -958,6 +1031,7 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
 
 @auto_docstring
 class AlbertForTokenClassification(AlbertPreTrainedModel):
+    """Albert for Token Classification."""
     def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1030,6 +1104,7 @@ class AlbertForTokenClassification(AlbertPreTrainedModel):
 
 @auto_docstring
 class AlbertForQuestionAnswering(AlbertPreTrainedModel):
+    "Albert for Question Answering."
     def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1108,6 +1183,7 @@ class AlbertForQuestionAnswering(AlbertPreTrainedModel):
 
 @auto_docstring
 class AlbertForMultipleChoice(AlbertPreTrainedModel):
+    """Albert for Multiple Choice."""
     def __init__(self, config: AlbertConfig):
         super().__init__(config)
 
