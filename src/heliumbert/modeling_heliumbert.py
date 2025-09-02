@@ -41,7 +41,7 @@ from transformers.pytorch_utils import (
     prune_linear_layer,
 )
 from transformers.utils import ModelOutput, auto_docstring, logging
-from .configuration_albert import AlbertConfig
+from .configuration_heliumbert import AlbertConfig
 
 # pylint: disable=abstract-method
 
