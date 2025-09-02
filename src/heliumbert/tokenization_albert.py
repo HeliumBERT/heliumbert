@@ -21,9 +21,9 @@ from typing import Any, Optional
 
 import sentencepiece as spm
 
-from ...tokenization_utils import AddedToken, PreTrainedTokenizer
-from ...utils import logging
-from ...utils.import_utils import requires
+from transformers.tokenization_utils import AddedToken, PreTrainedTokenizer
+from transformers.utils import logging
+from transformers.utils.import_utils import requires
 
 
 logger = logging.get_logger(__name__)
@@ -197,7 +197,7 @@ class AlbertTokenizer(PreTrainedTokenizer):
 
         return outputs
 
-    def _tokenize(self, text: str) -> list[str]:
+    def _tokenize(self, text: str, **kwargs) -> list[str]:
         """Tokenize a string."""
         text = self.preprocess_text(text)
         pieces = self.sp_model.encode(text, out_type=str)
@@ -301,7 +301,7 @@ class AlbertTokenizer(PreTrainedTokenizer):
 
     def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> tuple[str]:
         if not os.path.isdir(save_directory):
-            logger.error(f"Vocabulary path ({save_directory}) should be a directory")
+            logger.error("Vocabulary path (%s) should be a directory", save_directory)
             return
         out_vocab_file = os.path.join(
             save_directory, (filename_prefix + "-" if filename_prefix else "") + VOCAB_FILES_NAMES["vocab_file"]
