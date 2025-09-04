@@ -935,7 +935,10 @@ class HeliumbertForSequenceClassification(HeliumbertPreTrainedModel):
             return_dict=return_dict,
         )
 
-        pooled_output = outputs[1]
+        # pooled_output = outputs[1]
+
+        last_hidden_state = outputs[0]                   # (batch, seq_len, hidden_dim)
+        pooled_output = last_hidden_state[:, 0, :]       # take [CLS] token
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -963,9 +966,12 @@ class HeliumbertForSequenceClassification(HeliumbertPreTrainedModel):
                 loss_fct = BCEWithLogitsLoss()
                 loss = loss_fct(logits, labels)
 
+        # if not return_dict:
+        #     output = (logits,) + outputs[2:]
+        #     return ((loss,) + output) if loss is not None else output
+
         if not return_dict:
-            output = (logits,) + outputs[2:]
-            return ((loss,) + output) if loss is not None else output
+            return (loss, logits) if loss is not None else (logits,)
 
         return SequenceClassifierOutput(
             loss=loss,
